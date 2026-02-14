@@ -117,9 +117,7 @@
 
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
-        // On sépare les cœurs de l'arbre (treeHearts) et ceux qui tombent (fallingHearts)
         let branches = [], treeHearts = [], fallingHearts = [], animId;
-        let treeFinished = false; // Flag pour savoir quand lancer la pluie
 
         function setupCanvas() {
             const dpr = window.devicePixelRatio || 1;
@@ -200,27 +198,27 @@
             branches.push(new Branch(x, window.innerHeight, -Math.PI/2, 130, 16));
         }
 
-        function drawHeart(x, y, s, color) {
+        function drawHeart(x, y, s, color, rotation = 0) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation); // Permet de faire pivoter le cœur qui tombe
             ctx.fillStyle = color;
             ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.bezierCurveTo(x - s, y - s, x - s * 1.5, y + s / 2, x, y + s * 1.2);
-            ctx.bezierCurveTo(x + s * 1.5, y + s / 2, x + s, y - s, x, y);
+            ctx.moveTo(0, 0); // Centre relatif
+            ctx.bezierCurveTo(-s, -s, -s * 1.5, s / 2, 0, s * 1.2);
+            ctx.bezierCurveTo(s * 1.5, s / 2, s, -s, 0, 0);
             ctx.fill();
+            ctx.restore();
         }
 
         function loop() {
             ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
             
-            let growing = false;
-
-            // 1. Dessiner l'arbre
+            // 1. Gestion des branches
             for (let i = 0; i < branches.length; i++) {
                 const b = branches[i];
                 b.update();
                 const end = b.draw();
-                
-                if (!b.done) growing = true;
 
                 if (b.done && !b.spawned) {
                     b.spawned = true;
@@ -231,12 +229,13 @@
                             branches.push(new Branch(end.x, end.y, a, b.len * 0.75, b.width * 0.65));
                         }
                     } else {
-                        // Ce sont les cœurs fixés à l'arbre
+                        // Créer les cœurs fixes sur l'arbre
                         for (let k = 0; k < 12; k++) {
                             treeHearts.push({
                                 x: end.x + (Math.random() - 0.5) * 75,
                                 y: end.y + (Math.random() - 0.5) * 75,
-                                s: 0, max: Math.random() * 9 + 5,
+                                s: 0, 
+                                max: Math.random() * 9 + 5,
                                 c: CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)]
                             });
                         }
@@ -244,49 +243,47 @@
                 }
             }
 
-            // Si plus aucune branche ne pousse, on active le mode "Arbre fini"
-            if (!growing && branches.length > 10) {
-                treeFinished = true;
-            }
-
-            // 2. Dessiner les cœurs de l'arbre (fleurs)
+            // 2. Dessiner les cœurs attachés à l'arbre
             treeHearts.forEach(h => {
                 if (h.s < h.max) h.s += 0.25;
                 drawHeart(h.x, h.y, h.s, h.c);
             });
 
-            // 3. Gérer la pluie de cœurs (si l'arbre est fini)
-            if (treeFinished) {
-                // Créer de nouveaux cœurs qui tombent régulièrement
-                if (Math.random() < 0.15) { // Fréquence d'apparition
+            // 3. Logique de détachement (Pluie infinie)
+            // On attend qu'il y ait assez de cœurs sur l'arbre pour commencer à les faire tomber
+            if (treeHearts.length > 50) {
+                // Probabilité qu'un cœur tombe à chaque image (ajuster 0.4 pour +/- de pluie)
+                if (Math.random() < 0.4) {
+                    // On choisit un cœur au hasard sur l'arbre comme point de départ
+                    const sourceHeart = treeHearts[Math.floor(Math.random() * treeHearts.length)];
+                    
                     fallingHearts.push({
-                        // Apparition aléatoire autour de la cime de l'arbre
-                        x: (window.innerWidth > 768 ? window.innerWidth * 0.6 : window.innerWidth * 0.3) + Math.random() * window.innerWidth * 0.5,
-                        y: -20,
-                        s: Math.random() * 8 + 4,
-                        c: CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)],
-                        speed: 1 + Math.random() * 2, // Vitesse de chute
-                        oscillation: Math.random() * Math.PI * 2,
-                        windOffset: 0
+                        x: sourceHeart.x,
+                        y: sourceHeart.y,
+                        s: sourceHeart.s, // Taille identique
+                        c: sourceHeart.c, // Couleur identique
+                        vy: 1 + Math.random() * 1.5, // Vitesse de chute
+                        vx: 0.5 + Math.random() * 0.8, // Vent vers la droite
+                        oscillation: Math.random() * Math.PI, // Pour le balancement
+                        rot: 0 // Rotation
                     });
                 }
             }
 
-            // 4. Mettre à jour et dessiner les cœurs qui tombent
+            // 4. Animation des cœurs qui tombent
             for (let i = fallingHearts.length - 1; i >= 0; i--) {
                 let fh = fallingHearts[i];
-                fh.y += fh.speed; // Gravité
-                fh.oscillation += 0.05; // Mouvement de balancier
-                fh.windOffset += 0.02; // Vent progressif
                 
-                // Calcul de la position X avec vent vers la droite + petite oscillation
-                let windX = fh.x + Math.sin(fh.oscillation) * 1.5 + (0.5 * fh.speed); 
-                fh.x += 0.8; // Déplacement constant vers la droite (vent)
+                // Physique
+                fh.y += fh.vy; // Gravité
+                fh.x += fh.vx; // Vent vers la droite
+                fh.x += Math.sin(fh.y * 0.05 + fh.oscillation) * 0.5; // Oscillation douce
+                fh.rot = Math.sin(fh.y * 0.03) * 0.2; // Légère rotation pendant la chute
 
-                drawHeart(fh.x, fh.y, fh.s, fh.c);
+                drawHeart(fh.x, fh.y, fh.s, fh.c, fh.rot);
 
-                // Supprimer les cœurs sortis de l'écran
-                if (fh.y > window.innerHeight + 50) {
+                // Supprimer si hors écran (en bas ou trop à droite)
+                if (fh.y > window.innerHeight + 50 || fh.x > window.innerWidth + 50) {
                     fallingHearts.splice(i, 1);
                 }
             }
